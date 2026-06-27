@@ -1,0 +1,10 @@
+{:paths ["src" "resources"]
+ :deps  {}                                  ; ★ core は外部依存ゼロ（純 cljc）
+ :aliases
+ {;; malli はモデル検証(SSoT)用。WASM/コア経路には含めない。
+  :malli {:extra-deps {metosin/malli {:mvn/version "0.16.4"}}}
+  ;; テスト(JVM)。inflate_test だけ fixture 生成に java.util.zip を使う。
+  :test  {:extra-paths ["test"]
+          :extra-deps  {io.github.cognitect-labs/test-runner
+                        {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+          :main-opts   ["-m" "cognitect.test-runner"]}}}

@@ -1,0 +1,13 @@
+{:paths ["src" "test" "resources"]
+ :tasks
+ {test
+  {:doc "Run the pure-cljc test suite (no external deps)."
+   :requires ([clojure.test :as t]
+              [kasane.codec-test]
+              [kasane.decode-test]
+              [kasane.inflate-test])
+   :task (let [{:keys [fail error]}
+               (t/run-tests 'kasane.codec-test
+                            'kasane.decode-test
+                            'kasane.inflate-test)]
+           (System/exit (if (pos? (+ fail error)) 1 0)))}}}
