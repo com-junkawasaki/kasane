@@ -33,9 +33,32 @@
    :kasane/meta   {:version  (:ver raw)
                    :channels (:chans raw)}})
 
+(defn- nnum [x] (if (number? x) x 0))
+
+(defn pdf->doc
+  "Parsed PDF (kasane.cos/parse output) → :kasane/doc. Pages become :page
+   nodes carrying MediaBox bbox and extracted text runs."
+  [parsed pages-fn text-fn]
+  (let [objs  (:objects parsed)
+        pgs   (pages-fn parsed)
+        mb    (mapv nnum (get (first pgs) :MediaBox [0 0 0 0]))
+        [x0 y0 x1 y1] mb]
+    {:kasane/format :pdf
+     :kasane/canvas {:width (- x1 x0) :height (- y1 y0) :unit :pt :dpi 72}
+     :kasane/nodes  (vec (map-indexed
+                          (fn [i pg]
+                            (let [m (mapv nnum (get pg :MediaBox [0 0 0 0]))]
+                              {:node/id        (str "P" i)
+                               :node/kind      :page
+                               :pdf.page/index i
+                               :node/bbox      [(m 0) (m 1) (- (m 2) (m 0)) (- (m 3) (m 1))]
+                               :text/runs      (mapv (fn [t] {:text t}) (text-fn objs pg))}))
+                          pgs))
+     :kasane/meta   {:pages (count pgs)}}))
+
 (defn ->doc
   "Dispatch raw decode tree → :kasane/doc by detected format."
   [format raw]
   (case format
     :psd (psd->doc raw)
-    (throw (ex-info "kasane.normalize: unsupported format" {:format format}))))
+    (throw (ex-info "kasane.normalize: unsupported format (use psd->doc/pdf->doc directly)" {:format format}))))
