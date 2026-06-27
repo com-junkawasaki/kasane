@@ -128,29 +128,36 @@
 
 (defn- bytes->str [bs] (apply str (map char bs)))
 
+(def ^:private sketch-kind
+  {"artboard" :artboard "symbolMaster" :artboard "group" :group
+   "rectangle" :vector "oval" :vector "shapePath" :vector "polygon" :vector
+   "star" :vector "triangle" :vector "shapeGroup" :group
+   "text" :text "bitmap" :raster "symbolInstance" :smart-object "slice" :group})
+
+(defn- sketch-node [layer]
+  (let [f (:frame layer)]
+    (cond-> {:node/kind (get sketch-kind (:_class layer) :group)
+             :node/name (:name layer)}
+      f                  (assoc :node/bbox [(:x f) (:y f) (:width f) (:height f)])
+      (seq (:layers layer)) (assoc :node/children (mapv sketch-node (:layers layer))))))
+
 (defn- walk-artboards [node]
   (cond
-    (map? node)    (concat (when (#{"artboard" "symbolMaster"} (:_class node)) [node])
-                           (mapcat walk-artboards (:layers node)))
+    (map? node)        (concat (when (#{"artboard" "symbolMaster"} (:_class node)) [node])
+                               (mapcat walk-artboards (:layers node)))
     (sequential? node) (mapcat walk-artboards node)
     :else nil))
 
 (defn sketch->doc
   "Sketch ZIP entries (kasane.zip/parse) → :kasane/doc. Parses pages/*.json
-   (kasane.json) and extracts artboards (name + frame → bbox)."
+   (kasane.json) into a nested artboard→layer node tree (kind + frame→bbox)."
   [entries]
   (let [names (set (map :name entries))
         pages (filter #(re-find #"^pages/.*\.json$" (:name %)) entries)
         arts  (mapcat #(walk-artboards (json/parse (bytes->str (:bytes %)))) pages)]
     {:kasane/format :sketch
      :kasane/canvas {:unit :px}
-     :kasane/nodes  (vec (map-indexed
-                          (fn [i a] (let [f (:frame a)]
-                                      {:node/id   (str "AB" i)
-                                       :node/kind :artboard
-                                       :node/name (:name a)
-                                       :node/bbox [(:x f) (:y f) (:width f) (:height f)]}))
-                          arts))
+     :kasane/nodes  (vec (map-indexed (fn [i a] (assoc (sketch-node a) :node/id (str "AB" i))) arts))
      :kasane/meta   {:has-document (contains? names "document.json")
                      :entries (count entries) :pages (count pages) :artboards (count arts)}}))
 
@@ -160,26 +167,49 @@
   [xml tag]
   (mapv second (re-seq (re-pattern (str "<" tag "[^>]*>([\\s\\S]*?)</" tag ">")) xml)))
 
+(defn- pptx-shapes
+  "Extract <p:sp> shapes from a slide XML: position/size (EMU) + text."
+  [xml]
+  (for [[_ sp] (re-seq #"<p:sp>([\s\S]*?)</p:sp>" xml)]
+    (let [off (re-find #"<a:off\s+x=\"(-?\d+)\"\s+y=\"(-?\d+)\"" sp)
+          ext (re-find #"<a:ext\s+cx=\"(\d+)\"\s+cy=\"(\d+)\"" sp)
+          txt (xml-texts sp "a:t")]
+      {:bbox (when (and off ext)
+               (mapv #(#?(:clj Long/parseLong :cljs js/parseInt) %)
+                     [(nth off 1) (nth off 2) (nth ext 1) (nth ext 2)]))
+       :text txt})))
+
 (defn ooxml->doc
-  "OOXML ZIP entries → :kasane/doc. Detects docx/xlsx/pptx by part prefix and
-   extracts shown text (Word w:t / PowerPoint a:t / Excel shared-strings t)."
+  "OOXML ZIP entries → :kasane/doc. Detects docx/xlsx/pptx and extracts text
+   (Word w:t / Excel shared-strings t) or shapes with geometry (PowerPoint:
+   <p:sp> a:off/a:ext in EMU + a:t text)."
   [entries]
   (let [names (set (map :name entries))
         pref? (fn [p] (some #(str/starts-with? % p) names))
         fmt   (cond (pref? "word/") :docx (pref? "ppt/") :pptx (pref? "xl/") :xlsx :else :ooxml)
         part  (fn [n] (some #(when (= (:name %) n) (bytes->str (:bytes %))) entries))
-        parts-re (fn [re] (filter #(re-find re (:name %)) entries))
-        texts (case fmt
-                :docx (xml-texts (or (part "word/document.xml") "") "w:t")
-                :pptx (vec (mapcat #(xml-texts (bytes->str (:bytes %)) "a:t")
-                                   (parts-re #"^ppt/slides/slide\d+\.xml$")))
-                :xlsx (xml-texts (or (part "xl/sharedStrings.xml") "") "t")
-                [])]
-    {:kasane/format fmt
-     :kasane/canvas {:unit :pt}
-     :kasane/nodes  (vec (map-indexed (fn [i t] {:node/id (str "T" i) :node/kind :text
-                                                 :text/runs [{:text t}]}) texts))
-     :kasane/meta   {:entries (count entries) :text-runs (count texts)}}))
+        parts-re (fn [re] (filter #(re-find re (:name %)) entries))]
+    (if (= fmt :pptx)
+      (let [shapes (vec (mapcat #(pptx-shapes (bytes->str (:bytes %)))
+                                (parts-re #"^ppt/slides/slide\d+\.xml$")))]
+        {:kasane/format :pptx
+         :kasane/canvas {:unit :emu}
+         :kasane/nodes  (vec (map-indexed
+                              (fn [i s] (cond-> {:node/id (str "SP" i) :node/kind :group}
+                                          (:bbox s)        (assoc :node/bbox (:bbox s))
+                                          (seq (:text s))  (assoc :node/kind :text
+                                                                  :text/runs (mapv (fn [t] {:text t}) (:text s)))))
+                              shapes))
+         :kasane/meta   {:entries (count entries) :shapes (count shapes)}})
+      (let [texts (case fmt
+                    :docx (xml-texts (or (part "word/document.xml") "") "w:t")
+                    :xlsx (xml-texts (or (part "xl/sharedStrings.xml") "") "t")
+                    [])]
+        {:kasane/format fmt
+         :kasane/canvas {:unit :pt}
+         :kasane/nodes  (vec (map-indexed (fn [i t] {:node/id (str "T" i) :node/kind :text
+                                                     :text/runs [{:text t}]}) texts))
+         :kasane/meta   {:entries (count entries) :text-runs (count texts)}}))))
 
 (defn ttf->doc
   "Parsed SFNT font (kasane.ttf/parse) → :kasane/doc. A font is modelled as a
@@ -227,12 +257,24 @@
                           els))
      :kasane/meta   {:elements (count els)}}))
 
+(defn jpeg->doc
+  "Parsed JPEG (kasane.jpeg/parse) → :kasane/doc. Pixels are NOT decoded (DCT
+   deferred, ADR-2606272300) — the raster node carries a blob pointer and the
+   :jpeg format codec tag so the entropy-coded scan stays opaque."
+  [parsed]
+  (let [w (:width parsed) h (:height parsed)]
+    {:kasane/format :jpeg
+     :kasane/canvas {:width w :height h :unit :px :dpi 72}
+     :kasane/nodes  [(raster-node "raster" w h {:raster/blob {:cid nil :w w :h h :fmt :jpeg}})]
+     :kasane/meta   {:components (:components parsed) :progressive? (:progressive? parsed)}}))
+
 (defn ->doc
   "Dispatch raw decode tree → :kasane/doc by detected format."
   [format raw]
   (case format
     :psd  (psd->doc raw)
     :png  (png->doc raw)
+    :jpeg (jpeg->doc raw)
     :bmp  (bmp->doc raw)
     :tiff (tiff->doc raw)
     :gif  (gif->doc raw)
