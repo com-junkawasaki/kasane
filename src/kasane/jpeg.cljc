@@ -1,5 +1,5 @@
 (ns kasane.jpeg
-  "JPEG/JFIF metadata reader. Per ADR-2606272300, kasane does NOT decode DCT
+  "JPEG/JFIF metadata reader. Per ADR-2606280010, kasane does NOT decode DCT
    pixel data in R0 (a baseline JPEG decoder = Huffman + dequant + IDCT +
    upsample + YCbCr→RGB is a separate large effort); the entropy-coded scan is
    carried as an opaque blob. This reader walks the marker segments to recover

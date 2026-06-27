@@ -259,7 +259,7 @@
 
 (defn jpeg->doc
   "Parsed JPEG (kasane.jpeg/parse) → :kasane/doc. Pixels are NOT decoded (DCT
-   deferred, ADR-2606272300) — the raster node carries a blob pointer and the
+   deferred, ADR-2606280010) — the raster node carries a blob pointer and the
    :jpeg format codec tag so the entropy-coded scan stays opaque."
   [parsed]
   (let [w (:width parsed) h (:height parsed)]
