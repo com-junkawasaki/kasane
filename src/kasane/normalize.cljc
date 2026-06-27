@@ -74,10 +74,62 @@
                       :raster/blob  {:cid nil :w width :h height :fmt :raw}}]
      :kasane/meta   {:chunks (mapv :type (:chunks parsed))}}))
 
+(defn- raster-node [id w h extra]
+  (merge {:node/id id :node/kind :raster :node/visible? true :node/opacity 1.0
+          :node/blend :normal :node/bbox [0 0 w h]
+          :raster/blob {:cid nil :w w :h h :fmt :raw}}
+         extra))
+
+(defn bmp->doc
+  "Raw BMP decode tree → :kasane/doc (pixels left as blob pointer)."
+  [raw]
+  (let [w (:width raw) h (abs (:height raw))]
+    {:kasane/format :bmp
+     :kasane/canvas {:width w :height h :unit :px :dpi 72 :depth (:bpp raw)
+                     :compression (:compression raw)}
+     :kasane/nodes  [(raster-node "raster" w h {})]
+     :kasane/meta   {:dib-size (:dib-size raw) :data-offset (:data-offset raw)}}))
+
+(defn tiff->doc
+  "Parsed TIFF (kasane.tiff/parse) → :kasane/doc."
+  [parsed]
+  (let [w (:width parsed) h (:height parsed)]
+    {:kasane/format :tiff
+     :kasane/canvas {:width w :height h :unit :px :dpi 72
+                     :depth (:bits-per-sample parsed) :byte-order (:byte-order parsed)}
+     :kasane/nodes  [(raster-node "raster" w h {})]
+     :kasane/meta   {:compression (:compression parsed) :photometric (:photometric parsed)}}))
+
+(defn gif->doc
+  "Parsed GIF (kasane.gif/parse) → :kasane/doc (one :raster node per frame)."
+  [parsed]
+  (let [w (:width parsed) h (:height parsed)]
+    {:kasane/format :gif
+     :kasane/canvas {:width w :height h :unit :px :dpi 72}
+     :kasane/nodes  (vec (for [i (range (:frames parsed))] (raster-node (str "F" i) w h {})))
+     :kasane/meta   {:frames (:frames parsed) :version (:version parsed)}}))
+
+(defn ai->doc
+  "Parsed AI (modern .ai = PDF; kasane.cos/parse) → :kasane/doc. Pages become
+   :artboard nodes."
+  [parsed pages-fn text-fn]
+  (-> (pdf->doc parsed pages-fn text-fn)
+      (assoc :kasane/format :ai)
+      (update :kasane/nodes
+              (fn [nodes]
+                (mapv (fn [n] (-> n
+                                  (assoc :node/kind :artboard
+                                         :ai.artboard/index (:pdf.page/index n))
+                                  (dissoc :pdf.page/index)))
+                      nodes)))))
+
 (defn ->doc
   "Dispatch raw decode tree → :kasane/doc by detected format."
   [format raw]
   (case format
-    :psd (psd->doc raw)
-    :png (png->doc raw)
-    (throw (ex-info "kasane.normalize: unsupported format (use psd->doc/pdf->doc directly)" {:format format}))))
+    :psd  (psd->doc raw)
+    :png  (png->doc raw)
+    :bmp  (bmp->doc raw)
+    :tiff (tiff->doc raw)
+    :gif  (gif->doc raw)
+    (throw (ex-info "kasane.normalize: unsupported format (use pdf->doc/ai->doc directly)" {:format format}))))

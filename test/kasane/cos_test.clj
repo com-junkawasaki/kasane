@@ -36,6 +36,17 @@
       (is (= [0 0 200 100] (:node/bbox n)))
       (is (= "Hello kasane" (-> n :text/runs first :text))))))
 
+(deftest ai-normalize
+  ;; modern .ai = PDF; ai->doc reuses the COS path, pages become artboards.
+  (let [parsed (cos/parse (->ubytes uncompressed-pdf))
+        doc    (norm/ai->doc parsed cos/pages cos/page-text)]
+    (is (= :ai (:kasane/format doc)))
+    (let [n (first (:kasane/nodes doc))]
+      (is (= :artboard (:node/kind n)))
+      (is (= 0 (:ai.artboard/index n)))
+      (is (nil? (:pdf.page/index n)))
+      (is (= "Hello kasane" (-> n :text/runs first :text))))))
+
 ;; FlateDecode content stream — proves the pure inflate path through COS.
 (defn- zlib [^bytes in]
   (let [d (java.util.zip.Deflater.) out (java.io.ByteArrayOutputStream.) buf (byte-array 8192)]
