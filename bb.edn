@@ -6,10 +6,12 @@
               [kasane.codec-test]
               [kasane.decode-test]
               [kasane.inflate-test]
-              [kasane.cos-test])
+              [kasane.cos-test]
+              [kasane.png-test])
    :task (let [{:keys [fail error]}
                (t/run-tests 'kasane.codec-test
                             'kasane.decode-test
                             'kasane.inflate-test
-                            'kasane.cos-test)]
+                            'kasane.cos-test
+                            'kasane.png-test)]
            (System/exit (if (pos? (+ fail error)) 1 0)))}}}

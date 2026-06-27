@@ -56,9 +56,28 @@
                           pgs))
      :kasane/meta   {:pages (count pgs)}}))
 
+(defn png->doc
+  "Parsed PNG (kasane.png/parse output) → :kasane/doc. A single :raster node;
+   pixels are NOT inlined — :raster/blob is a pointer (cid filled when the
+   sample buffer is offloaded to B2/DataLad, per CLAUDE.md / ADR-2606272100)."
+  [parsed]
+  (let [{:keys [width height color-type bit-depth]} (:ihdr parsed)]
+    {:kasane/format :png
+     :kasane/canvas {:width width :height height :unit :px :dpi 72
+                     :color-mode color-type :depth bit-depth}
+     :kasane/nodes  [{:node/id      "raster"
+                      :node/kind    :raster
+                      :node/visible? true
+                      :node/opacity 1.0
+                      :node/blend   :normal
+                      :node/bbox    [0 0 width height]
+                      :raster/blob  {:cid nil :w width :h height :fmt :raw}}]
+     :kasane/meta   {:chunks (mapv :type (:chunks parsed))}}))
+
 (defn ->doc
   "Dispatch raw decode tree → :kasane/doc by detected format."
   [format raw]
   (case format
     :psd (psd->doc raw)
+    :png (png->doc raw)
     (throw (ex-info "kasane.normalize: unsupported format (use psd->doc/pdf->doc directly)" {:format format}))))

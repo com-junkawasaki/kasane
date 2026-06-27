@@ -80,8 +80,12 @@
                   (b/seek! cur end)
                   (assoc v :_length n))
                 (read-struct grammar (:of field) cur))
-      :seq   (let [n (resolve-num (:count field) ctx)]
-               (vec (repeatedly n #(read-struct grammar (:of field) cur))))
+      :seq   (if (:until-eof field)
+               (loop [acc []]                                  ; read structs until cursor EOF
+                 (if (b/eof? cur) acc
+                     (recur (conj acc (read-struct grammar (:of field) cur)))))
+               (let [n (resolve-num (:count field) ctx)]
+                 (vec (repeatedly n #(read-struct grammar (:of field) cur)))))
       (throw (ex-info "decode: unknown field type" {:type (:type field) :field field})))))
 
 (defn read-struct
