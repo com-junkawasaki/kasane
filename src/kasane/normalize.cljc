@@ -3,7 +3,8 @@
    :kasane/doc model — the cross-format layered tree from ADR-2606272100.
    Pure cljc."
   (:require [clojure.string :as str]
-            [kasane.json :as json]))
+            [kasane.json :as json]
+            [kasane.svg :as svg]))
 
 (def ^:private psd-blend->kw
   {"norm" :normal "mul " :multiply "scrn" :screen "over" :overlay
@@ -190,6 +191,42 @@
    :kasane/meta   {:family (:family parsed) :glyphs (:num-glyphs parsed)
                    :tables (:tables parsed) :sfnt-version (:sfnt-version parsed)}})
 
+(defn gltf->doc
+  "Parsed glTF (kasane.gltf/parse) → :kasane/doc. glTF nodes → :mesh/:group
+   nodes (name + transform matrix). 3D, so :kasane/canvas has no 2D size."
+  [parsed]
+  (let [g (:json parsed)]
+    {:kasane/format :gltf
+     :kasane/canvas {:unit :scene}
+     :kasane/nodes  (vec (map-indexed
+                          (fn [i n] (cond-> {:node/id (str "N" i)
+                                            :node/kind (if (:mesh n) :mesh :group)}
+                                      (:name n)   (assoc :node/name (:name n))
+                                      (:matrix n) (assoc :node/transform (:matrix n))))
+                          (:nodes g)))
+     :kasane/meta   {:meshes (count (:meshes g)) :scenes (count (:scenes g))
+                     :version (get-in g [:asset :version])}}))
+
+(def ^:private svg-kind {:text :text :image :raster})
+
+(defn svg->doc
+  "SVG string → :kasane/doc. Shape elements become vector/text/raster nodes."
+  [svg-str]
+  (let [root (svg/root-attrs svg-str)
+        els  (svg/elements svg-str)]
+    {:kasane/format :svg
+     :kasane/canvas {:unit :px
+                     :width  (svg/parse-len (:width root))
+                     :height (svg/parse-len (:height root))}
+     :kasane/nodes  (vec (map-indexed
+                          (fn [i {:keys [tag attrs]}]
+                            {:node/id   (str "S" i)
+                             :node/kind (get svg-kind tag :vector)
+                             :svg/tag   tag
+                             :svg/attrs attrs})
+                          els))
+     :kasane/meta   {:elements (count els)}}))
+
 (defn ->doc
   "Dispatch raw decode tree → :kasane/doc by detected format."
   [format raw]
@@ -200,4 +237,6 @@
     :tiff (tiff->doc raw)
     :gif  (gif->doc raw)
     :ttf  (ttf->doc raw)
+    :gltf (gltf->doc raw)
+    :svg  (svg->doc raw)
     (throw (ex-info "kasane.normalize: unsupported format (use pdf->doc/ai->doc directly)" {:format format}))))
