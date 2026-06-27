@@ -4,11 +4,9 @@
    (re-read via Pillow). The library is dependency-free; Pillow is only the
    fixture oracle.
 
-   TIFF (MSB, early-change) is verified bit-exact — including a 96x40 image that
-   crosses the 9→10→11→12-bit code-width boundaries. GIF (LSB, non-early)
-   decodes to the correct pixel COUNT but exact values still disagree with the
-   Pillow oracle at row/dict boundaries; GIF pixel decode is therefore
-   EXPERIMENTAL (see ADR-2606272100). The shared LZW core is proven by TIFF."
+   Both are verified bit-exact: TIFF (MSB, early-change) and GIF (LSB,
+   non-early) — including a 96x40 image that crosses the 9→10→11→12-bit
+   code-width boundaries, and an interlaced GIF (4-pass de-ordering)."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -28,9 +26,11 @@
       (is (= 3840 (count exp)))
       (is (= exp (tiff/pixels (rd "kasane/fixtures/lzw_big.tif")))))))
 
-(deftest gif-lzw-pixel-count
-  ;; EXPERIMENTAL: assert structural validity (right pixel count) only.
-  (testing "small 4x2"
-    (is (= 8 (count (gif/first-frame-indices (rd "kasane/fixtures/lzw_idx.gif"))))))
-  (testing "96x40 decodes to the full pixel count"
-    (is (= 3840 (count (gif/first-frame-indices (rd "kasane/fixtures/lzw_big.gif")))))))
+(deftest gif-lzw-pixels
+  (testing "small 4x2 indexed LZW vs Pillow ground truth"
+    (is (= (get-in (expected "kasane/fixtures/expected.edn") [:gif-idx :indices])
+           (gif/first-frame-indices (rd "kasane/fixtures/lzw_idx.gif")))))
+  (testing "96x40 interlaced indexed LZW (bit-exact, 4-pass de-ordering)"
+    (let [exp (get-in (expected "kasane/fixtures/expected_big.edn") [:gif :indices])]
+      (is (= 3840 (count exp)))
+      (is (= exp (gif/first-frame-indices (rd "kasane/fixtures/lzw_big.gif")))))))

@@ -22,14 +22,24 @@
 (defn- skip-subblocks [bv i]
   (loop [j i] (let [len (nth bv j)] (if (zero? len) (inc j) (recur (+ j 1 len))))))
 
+(defn- u16le [bv o] (+ (nth bv o) (* 256 (nth bv (inc o)))))
+
+(defn- deinterlace
+  "Reorder interlaced GIF rows (4-pass scheme) into row-major."
+  [linear w h]
+  (let [rows   (vec (partition w linear))
+        order  (vec (concat (range 0 h 8) (range 4 h 8) (range 2 h 4) (range 1 h 2)))
+        placed (reduce (fn [m k] (assoc m (nth order k) (nth rows k))) {} (range (count rows)))]
+    (vec (mapcat #(get placed %) (range h)))))
+
 (defn first-frame-indices
-  "Decode the first frame's palette indices (LZW, LSB, non-early). Returns a
-   vector of color-table indices (row-major). EXPERIMENTAL: decodes to the
-   correct pixel count but exact values still disagree with the reference at
-   row/dict boundaries (the shared LZW core is verified via TIFF). R0: first
-   frame only, no interlace de-ordering. See ADR-2606272100."
+  "Decode the first frame's palette indices (LZW, LSB, non-early) → row-major
+   color-table indices. Handles the GIF interlace flag (4-pass de-ordering).
+   R0: first frame only. See ADR-2606272100."
   [data]
   (let [bv       (vec data)
+        w        (u16le bv 6)
+        h        (u16le bv 8)
         flags    (nth bv 10)
         gct-size (if (bit-test flags 7) (* 3 (bit-shift-left 1 (inc (bit-and flags 7)))) 0)
         imgsep   (loop [i (+ 13 gct-size)]
@@ -38,10 +48,12 @@
                            (= b 0x21) (recur (skip-subblocks bv (+ i 2)))   ; extension block
                            :else (throw (ex-info "gif: no image descriptor" {:byte b})))))
         dflags   (nth bv (+ imgsep 9))
+        interlace? (bit-test dflags 6)
         lct-size (if (bit-test dflags 7) (* 3 (bit-shift-left 1 (inc (bit-and dflags 7)))) 0)
         mcs-pos  (+ imgsep 10 lct-size)
         mcs      (nth bv mcs-pos)
         lzwdata  (loop [j (inc mcs-pos) acc []]
                    (let [len (nth bv j)]
-                     (if (zero? len) acc (recur (+ j 1 len) (into acc (subvec bv (inc j) (+ j 1 len)))))))]
-    (codec/lzw lzwdata {:order :lsb :min-code-size mcs :early-change false})))
+                     (if (zero? len) acc (recur (+ j 1 len) (into acc (subvec bv (inc j) (+ j 1 len)))))))
+        linear   (codec/lzw lzwdata {:order :lsb :min-code-size mcs :early-change false})]
+    (if interlace? (deinterlace linear w h) linear)))
