@@ -266,3 +266,36 @@
 
 (defn page-text [objs page]
   (extract-text (page-content-str objs page)))
+
+;; ---- image XObjects ------------------------------------------------------
+(defn page-images
+  "Image XObjects referenced from a page's /Resources /XObject. Returns
+   {:name :w :h :bpc :colorspace :filter :stream}."
+  [objs page]
+  (let [res  (resolve-ref objs (:Resources page))
+        xobj (resolve-ref objs (:XObject res))]
+    (when (map? xobj)
+      (keep (fn [[k v]]
+              (let [s (resolve-ref objs v)]
+                (when (and (map? s) (::stream s) (= (:Subtype (:dict s)) :Image))
+                  {:name       (name k)
+                   :w          (:Width (:dict s))
+                   :h          (:Height (:dict s))
+                   :bpc        (:BitsPerComponent (:dict s))
+                   :colorspace (resolve-ref objs (:ColorSpace (:dict s)))
+                   :filter     (resolve-ref objs (:Filter (:dict s)))
+                   :stream     s})))
+            xobj))))
+
+(defn decode-image
+  "Decode an image XObject (from page-images). FlateDecode → raw samples;
+   DCTDecode → the embedded JPEG bytes (feed to kasane.jpeg.decode/decode-rgb,
+   kept decoupled); other filters → opaque. JPXDecode/CCITT are opaque (R0)."
+  [_objs img]
+  (let [raw (:raw (:stream img))
+        f   (:filter img)
+        fs  (cond (nil? f) [] (keyword? f) [f] (vector? f) f :else [])]
+    (cond
+      (some #{:DCTDecode} fs)   {:fmt :jpeg :jpeg raw :w (:w img) :h (:h img)}
+      (some #{:FlateDecode} fs) {:fmt :raw  :samples (codec/decode :flate raw) :w (:w img) :h (:h img) :bpc (:bpc img)}
+      :else                     {:fmt :opaque :opaque raw :w (:w img) :h (:h img)})))

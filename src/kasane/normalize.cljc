@@ -336,6 +336,20 @@
                                                  :text/runs [{:text t}]}) texts))
      :kasane/meta   {:entries (count entries)}}))
 
+(defn isobmff->doc
+  "Parsed ISOBMFF (kasane.isobmff/parse) → :kasane/doc. AVIF/HEIC pixels
+   (AV1/HEVC) are NOT decoded — opaque blob; dims/brand come from the box tree."
+  [parsed]
+  (let [fmt (case (:brand parsed)
+              "avif" :avif
+              ("heic" "heix" "heim" "heis" "mif1" "msf1") :heic
+              :isobmff)
+        w (:width parsed) h (:height parsed)]
+    {:kasane/format fmt
+     :kasane/canvas {:width w :height h :unit :px :dpi 72}
+     :kasane/nodes  [(raster-node "raster" (or w 0) (or h 0) {:raster/blob {:cid nil :w w :h h :fmt fmt}})]
+     :kasane/meta   {:brand (:brand parsed) :boxes (:boxes parsed)}}))
+
 (defn ->doc
   "Dispatch raw decode tree → :kasane/doc by detected format."
   [format raw]
@@ -343,6 +357,7 @@
     :psd  (psd->doc raw)
     :png  (png->doc raw)
     :jpeg (jpeg->doc raw)
+    (:avif :heic :isobmff) (isobmff->doc raw)
     :bmp  (bmp->doc raw)
     :tiff (tiff->doc raw)
     :gif  (gif->doc raw)
