@@ -1,5 +1,7 @@
 # kasane（重ね）
 
+[![CI](https://github.com/kotoba-lang/kasane/actions/workflows/ci.yml/badge.svg)](https://github.com/kotoba-lang/kasane/actions/workflows/ci.yml)
+
 Adobe(AI/PSD/PDF) を **外部依存ゼロの純 cljc + EDN データ駆動文法**で扱うライブラリ。
 ImageMagick / psd-tools / MuPDF / pdfium に依存しない。binary 文法を EDN で宣言し、
 小さな純 cljc エンジンで解析する（Kaitai Struct を EDN データ + Clojure 解釈で再構成）。
