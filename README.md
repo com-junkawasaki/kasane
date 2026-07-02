@@ -47,7 +47,7 @@ EDN 文法は宣言的データ:
 
 ```bash
 bb test            # 純 cljc スイート（外部依存なし・速い）
-clojure -X:test    # JVM test-runner
+clojure -M:test    # JVM test-runner
 ```
 
 `inflate_test` のみ、fixture 生成に JVM の `java.util.zip.Deflater` を使う
